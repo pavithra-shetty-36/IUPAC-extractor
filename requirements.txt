@@ -1,4 +1,6 @@
 streamlit
-pdfplumber
+pypdf
 transformers
 torch
+easyocr
+pdf2image
