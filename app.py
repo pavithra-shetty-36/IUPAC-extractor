@@ -4,8 +4,8 @@ import io
 import re
 
 # 1. App Title and Description
-st.title("🧪 Targeted Chemical IUPAC Name Extractor")
-st.write("Upload a digital PDF to map out systematic IUPAC names linked directly to their Compound Numbers and Page Numbers.")
+st.title("🧪 Final Chemical Compound IUPAC Extractor")
+st.write("Upload a digital PDF to extract ONLY the final target compound IUPAC names linked to your specified compound numbers.")
 
 # 2. Sidebar Configuration Controls
 st.sidebar.header("Filter Options")
@@ -33,14 +33,13 @@ with c_col2:
 # Main File Uploader
 uploaded_file = st.file_uploader("Upload your digital PDF here", type=["pdf"], key="clean_uploader")
 
-# Advanced Layout Parser to isolate Compound Numbers and their matching IUPAC names per page
-def extract_compounds_with_metadata(pdf_reader, s_page, e_page, c_min, c_max):
+# Advanced parsing to extract ONLY the final compound name
+def extract_final_compounds(pdf_reader, s_page, e_page, c_min, c_max):
     extracted_data = []
     
-    # Rigorous IUPAC pattern matching blocks
+    # Core IUPAC regex token
     iupac_regex = r'\b(?:[0-9,\'\"\-a-zA-Z\s\(\)\[\]]*)?(?:meth|eth|prop|but|pent|hex|hept|oct|non|dec|iso|cyclo|benz|phen|chloro|bromo|fluoro|iodo|amino|nitro|hydroxy|oxo|methyl|ethyl|propyl|butyl|phenyl|benzyl)+(?:ane|ene|yne|ol|one|al|oic\sacid|ate|ic\sacid|ide|ine|ole|azole|in|an|est|yl|oxy|µ|alpha|beta|gamma)s?\b'
 
-    # Loop through the document page by page to track where items live
     for page_idx in range(s_page, e_page):
         page_num = page_idx + 1
         text_content = pdf_reader.pages[page_idx].extract_text()
@@ -48,9 +47,8 @@ def extract_compounds_with_metadata(pdf_reader, s_page, e_page, c_min, c_max):
         if not text_content:
             continue
             
-        # Look for explicit compound label markers (e.g., "Compound 4", "Compound (IV)", "Example 4", or standalone bold-style numbers)
-        # This matches variations like: Compound 1, Compound 1a, Example 1, No. 1
-        compound_markers = re.finditer(r'\b(?:Compound|Example|No\.|\b)\s*([0-9]+)[a-z]?\b', text_content, re.IGNORECASE)
+        # Search for exact compound declarations (e.g., "Compound 1" or standalone "1" at start of line/paragraph)
+        compound_markers = re.finditer(r'\b(?:Compound|Example|No\.|\b)\s*([0-9]+)[a-zA-Z]?\b', text_content, re.IGNORECASE)
         
         for marker in compound_markers:
             try:
@@ -58,71 +56,72 @@ def extract_compounds_with_metadata(pdf_reader, s_page, e_page, c_min, c_max):
             except ValueError:
                 continue
                 
-            # Check if this compound matches your target user range (e.g., 1 to 97)
             if c_min <= comp_num <= c_max:
-                # Isolate the text window right after the compound identifier (where the IUPAC name is typically stated)
                 start_pos = marker.end()
-                window_text = text_content[start_pos:start_pos + 400] # Check next 400 characters
                 
-                # Scan this local window for a structural IUPAC match
+                # Squeeze the window down significantly (first 150 chars) to get ONLY the heading title name
+                # Final IUPAC names are usually right next to the compound header number before the text describes the method
+                window_text = text_content[start_pos:start_pos + 150]
+                
+                # Check if common reaction words (used for intermediates/reagents) are in this block. 
+                # If they are, it means we stumbled into the experiment text, not the main title.
+                if any(word in window_text.lower() for word in ["added to", "dissolved in", "stirred for", "washed with"]):
+                    continue
+
                 chemical_matches = re.findall(iupac_regex, window_text, re.IGNORECASE)
                 
-                for chem in chemical_matches:
-                    cleaned_chem = chem.strip(" .,()[]-:")
-                    # Ensure it is a valid name string and not short text/noise
+                if chemical_matches:
+                    # Select ONLY the very first chemical match found immediately after the number
+                    # This prevents capturing intermediates listed later in the paragraph sentences
+                    primary_chem = chemical_matches[0]
+                    cleaned_chem = primary_chem.strip(" .,()[]-:")
+                    
                     if len(cleaned_chem) > 6 and not cleaned_chem.isdigit() and any(char.isalpha() for char in cleaned_chem):
-                        
-                        # Save structural entry data
                         record = {
                             "Compound ID": f"Compound {comp_num}",
-                            "IUPAC Name": cleaned_chem,
+                            "Final IUPAC Name": cleaned_chem,
                             "Page Number": page_num
                         }
                         
-                        # Prevent exact duplicates from flooding the display list
-                        if record not in extracted_data:
+                        # Update or add record (ensuring one primary IUPAC per compound number)
+                        if not any(r["Compound ID"] == record["Compound ID"] for r in extracted_data):
                             extracted_data.append(record)
                             
     return extracted_data
 
 # 3. Process the PDF file if uploaded
 if uploaded_file is not None:
-    with st.spinner("Extracting and matching compound layouts..."):
+    with st.spinner("Isolating final compound names..."):
         try:
             file_bytes = uploaded_file.read()
             pdf_data = io.BytesIO(file_bytes)
             reader = PdfReader(pdf_data)
             total_pages = len(reader.pages)
             
-            # Restrict page bounds securely to match actual PDF length
             actual_start = max(1, start_page) - 1
             actual_end = min(total_pages, end_page)
             
-            st.info(f"Scanning Page {actual_start+1} to {actual_end} for Compounds {comp_start} through {comp_end}...")
+            st.info(f"Scanning Page {actual_start+1} to {actual_end}...")
             
-            # Execute our smart page-by-page mapping script
-            results = extract_compounds_with_metadata(reader, actual_start, actual_end, comp_start, comp_end)
+            results = extract_final_compounds(reader, actual_start, actual_end, comp_start, comp_end)
 
             # 4. Display mapped results in a layout table
             if results:
-                st.success(f"Successfully mapped {len(results)} compounds matching your instructions!")
-                
-                # Turn results into an interactive visual table matrix
+                st.success(f"Successfully isolated {len(results)} final compounds!")
                 st.dataframe(results, use_container_width=True)
                 
-                # Create structured CSV file data
-                csv_header = "Compound ID,IUPAC Name,Page Number\n"
-                csv_rows = [f'"{r["Compound ID"]}","{r["IUPAC Name"]}",{r["Page Number"]}' for r in results]
+                csv_header = "Compound ID,Final IUPAC Name,Page Number\n"
+                csv_rows = [f'"{r["Compound ID"]}","{r["Final IUPAC Name"]}",{r["Page Number"]}' for r in results]
                 csv_data = csv_header + "\n".join(csv_rows)
                 
                 st.download_button(
-                    label="Download Mapped Report as CSV",
+                    label="Download Final Compound Report as CSV",
                     data=csv_data,
-                    file_name="chemical_compound_report.csv",
+                    file_name="final_compounds_only.csv",
                     mime="text/csv"
                 )
             else:
-                st.warning("No structural IUPAC names matching that compound number range were found on those pages. Try expanding your page or compound range filters.")
+                st.warning("No definitive final compound headings matching that range were found. Try adjusting your target constraints.")
                 
         except Exception as e:
             st.error(f"An error occurred during layout processing: {e}")
