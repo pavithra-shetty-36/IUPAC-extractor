@@ -2,10 +2,11 @@ import streamlit as st
 from pypdf import PdfReader
 import io
 import re
+import requests
 
 # 1. App Title and Description
-st.title("🧪 Final Chemical Compound IUPAC Extractor")
-st.write("Upload a digital PDF to extract ONLY the final target compound IUPAC names linked to your specified compound numbers.")
+st.title("🧪 Verified Final Chemical Compound IUPAC Extractor")
+st.write("This version uses the Cambridge OPSIN engine to validate real chemical names and filter out random text noise.")
 
 # 2. Sidebar Configuration Controls
 st.sidebar.header("Filter Options")
@@ -33,12 +34,28 @@ with c_col2:
 # Main File Uploader
 uploaded_file = st.file_uploader("Upload your digital PDF here", type=["pdf"], key="clean_uploader")
 
-# Advanced parsing to extract ONLY the final compound name
-def extract_final_compounds(pdf_reader, s_page, e_page, c_min, c_max):
-    extracted_data = []
+# Function that checks if a string is a REAL IUPAC name using Cambridge OPSIN
+def is_valid_iupac(text_string):
+    # Clean up common text garbage around the word
+    clean_string = text_string.strip(" .,()[]-:")
     
-    # Core IUPAC regex token
-    iupac_regex = r'\b(?:[0-9,\'\"\-a-zA-Z\s\(\)\[\]]*)?(?:meth|eth|prop|but|pent|hex|hept|oct|non|dec|iso|cyclo|benz|phen|chloro|bromo|fluoro|iodo|amino|nitro|hydroxy|oxo|methyl|ethyl|propyl|butyl|phenyl|benzyl)+(?:ane|ene|yne|ol|one|al|oic\sacid|ate|ic\sacid|ide|ine|ole|azole|in|an|est|yl|oxy|µ|alpha|beta|gamma)s?\b'
+    # Fast filtering of obvious non-chemical text noise
+    if len(clean_string) < 7 or any(phrase in clean_string.lower() for phrase in ["mixture of", "by replacing", "added to", "solution of", "prepared from"]):
+        return False, None
+        
+    try:
+        # Query the official OPSIN web API (free, instant, no-key required)
+        url = f"https://opsin.ch.cam.ac.uk/opsin/{clean_string}.json"
+        response = requests.get(url, timeout=3)
+        if response.status_code == 200:
+            return True, clean_string # It's a verified IUPAC name!
+    except:
+        pass
+    return False, None
+
+# Main text splitter and parser
+def extract_verified_final_compounds(pdf_reader, s_page, e_page, c_min, c_max):
+    extracted_data = []
 
     for page_idx in range(s_page, e_page):
         page_num = page_idx + 1
@@ -47,51 +64,46 @@ def extract_final_compounds(pdf_reader, s_page, e_page, c_min, c_max):
         if not text_content:
             continue
             
-        # Search for exact compound declarations (e.g., "Compound 1" or standalone "1" at start of line/paragraph)
-        compound_markers = re.finditer(r'\b(?:Compound|Example|No\.|\b)\s*([0-9]+)[a-zA-Z]?\b', text_content, re.IGNORECASE)
-        
-        for marker in compound_markers:
-            try:
-                comp_num = int(marker.group(1))
-            except ValueError:
-                continue
-                
-            if c_min <= comp_num <= c_max:
-                start_pos = marker.end()
-                
-                # Squeeze the window down significantly (first 150 chars) to get ONLY the heading title name
-                # Final IUPAC names are usually right next to the compound header number before the text describes the method
-                window_text = text_content[start_pos:start_pos + 150]
-                
-                # Check if common reaction words (used for intermediates/reagents) are in this block. 
-                # If they are, it means we stumbled into the experiment text, not the main title.
-                if any(word in window_text.lower() for word in ["added to", "dissolved in", "stirred for", "washed with"]):
+        # Regex to find where compound headings are declared (e.g. "Compound 1", "Example 4")
+        # Captures lines containing the compound marker
+        lines = text_content.split('\n')
+        for line in lines:
+            marker = re.search(r'\b(?:Compound|Example|No\.|\b)\s*([0-9]+)\b', line, re.IGNORECASE)
+            if marker:
+                try:
+                    comp_num = int(marker.group(1))
+                except ValueError:
                     continue
-
-                chemical_matches = re.findall(iupac_regex, window_text, re.IGNORECASE)
                 
-                if chemical_matches:
-                    # Select ONLY the very first chemical match found immediately after the number
-                    # This prevents capturing intermediates listed later in the paragraph sentences
-                    primary_chem = chemical_matches[0]
-                    cleaned_chem = primary_chem.strip(" .,()[]-:")
+                # Check if it falls in your targeted range
+                if c_min <= comp_num <= c_max:
+                    # Final compound names are almost always in the same header line or right below it
+                    # Split the line by spaces or commas to check individual large word blocks
+                    potential_blocks = re.split(r'\s{2,}|,\s|(?<=\s)(?=\()', line)
                     
-                    if len(cleaned_chem) > 6 and not cleaned_chem.isdigit() and any(char.isalpha() for char in cleaned_chem):
-                        record = {
-                            "Compound ID": f"Compound {comp_num}",
-                            "Final IUPAC Name": cleaned_chem,
-                            "Page Number": page_num
-                        }
-                        
-                        # Update or add record (ensuring one primary IUPAC per compound number)
-                        if not any(r["Compound ID"] == record["Compound ID"] for r in extracted_data):
-                            extracted_data.append(record)
+                    for block in potential_blocks:
+                        # Skip text chunks that contain reaction method keywords
+                        if any(k in block.lower() for k in ["stirred", "mixture", "replacing", "reaction", "added", "yield"]):
+                            continue
                             
+                        # Double-check against the Cambridge chemical structure parser
+                        is_chemical, verified_name = is_valid_iupac(block)
+                        if is_chemical:
+                            record = {
+                                "Compound ID": f"Compound {comp_num}",
+                                "Final IUPAC Name": verified_name,
+                                "Page Number": page_num
+                            }
+                            # Keep only one primary validated compound entry per number
+                            if not any(r["Compound ID"] == record["Compound ID"] for r in extracted_data):
+                                extracted_data.append(record)
+                                break # Found the main title final compound, stop looking in this line
+                                
     return extracted_data
 
 # 3. Process the PDF file if uploaded
 if uploaded_file is not None:
-    with st.spinner("Isolating final compound names..."):
+    with st.spinner("Extracting text and verifying real IUPAC structures via OPSIN..."):
         try:
             file_bytes = uploaded_file.read()
             pdf_data = io.BytesIO(file_bytes)
@@ -103,11 +115,11 @@ if uploaded_file is not None:
             
             st.info(f"Scanning Page {actual_start+1} to {actual_end}...")
             
-            results = extract_final_compounds(reader, actual_start, actual_end, comp_start, comp_end)
+            results = extract_verified_final_compounds(reader, actual_start, actual_end, comp_start, comp_end)
 
             # 4. Display mapped results in a layout table
             if results:
-                st.success(f"Successfully isolated {len(results)} final compounds!")
+                st.success(f"Successfully isolated {len(results)} verified final compounds!")
                 st.dataframe(results, use_container_width=True)
                 
                 csv_header = "Compound ID,Final IUPAC Name,Page Number\n"
@@ -115,13 +127,13 @@ if uploaded_file is not None:
                 csv_data = csv_header + "\n".join(csv_rows)
                 
                 st.download_button(
-                    label="Download Final Compound Report as CSV",
+                    label="Download Verified Report as CSV",
                     data=csv_data,
-                    file_name="final_compounds_only.csv",
+                    file_name="verified_final_compounds.csv",
                     mime="text/csv"
                 )
             else:
-                st.warning("No definitive final compound headings matching that range were found. Try adjusting your target constraints.")
+                st.warning("No verified IUPAC titles matching that compound range passed chemical validation on these pages.")
                 
         except Exception as e:
             st.error(f"An error occurred during layout processing: {e}")
