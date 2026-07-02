@@ -69,4 +69,60 @@ def extract_compounds_with_metadata(pdf_reader, s_page, e_page, c_min, c_max):
                 
                 for chem in chemical_matches:
                     cleaned_chem = chem.strip(" .,()[]-:")
-                    # Ensure it is a valid name string and not
+                    # Ensure it is a valid name string and not short text/noise
+                    if len(cleaned_chem) > 6 and not cleaned_chem.isdigit() and any(char.isalpha() for char in cleaned_chem):
+                        
+                        # Save structural entry data
+                        record = {
+                            "Compound ID": f"Compound {comp_num}",
+                            "IUPAC Name": cleaned_chem,
+                            "Page Number": page_num
+                        }
+                        
+                        # Prevent exact duplicates from flooding the display list
+                        if record not in extracted_data:
+                            extracted_data.append(record)
+                            
+    return extracted_data
+
+# 3. Process the PDF file if uploaded
+if uploaded_file is not None:
+    with st.spinner("Extracting and matching compound layouts..."):
+        try:
+            file_bytes = uploaded_file.read()
+            pdf_data = io.BytesIO(file_bytes)
+            reader = PdfReader(pdf_data)
+            total_pages = len(reader.pages)
+            
+            # Restrict page bounds securely to match actual PDF length
+            actual_start = max(1, start_page) - 1
+            actual_end = min(total_pages, end_page)
+            
+            st.info(f"Scanning Page {actual_start+1} to {actual_end} for Compounds {comp_start} through {comp_end}...")
+            
+            # Execute our smart page-by-page mapping script
+            results = extract_compounds_with_metadata(reader, actual_start, actual_end, comp_start, comp_end)
+
+            # 4. Display mapped results in a layout table
+            if results:
+                st.success(f"Successfully mapped {len(results)} compounds matching your instructions!")
+                
+                # Turn results into an interactive visual table matrix
+                st.dataframe(results, use_container_width=True)
+                
+                # Create structured CSV file data
+                csv_header = "Compound ID,IUPAC Name,Page Number\n"
+                csv_rows = [f'"{r["Compound ID"]}","{r["IUPAC Name"]}",{r["Page Number"]}' for r in results]
+                csv_data = csv_header + "\n".join(csv_rows)
+                
+                st.download_button(
+                    label="Download Mapped Report as CSV",
+                    data=csv_data,
+                    file_name="chemical_compound_report.csv",
+                    mime="text/csv"
+                )
+            else:
+                st.warning("No structural IUPAC names matching that compound number range were found on those pages. Try expanding your page or compound range filters.")
+                
+        except Exception as e:
+            st.error(f"An error occurred during layout processing: {e}")
