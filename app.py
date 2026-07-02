@@ -2,21 +2,14 @@ import streamlit as st
 from pypdf import PdfReader
 import io
 import re
-import numpy as np
+import pytesseract
 from pdf2image import convert_from_bytes
-from paddleocr import PaddleOCR
 
 # 1. App Title and Description
-st.title("🧪 Advanced Chemical IUPAC Name Extractor")
-st.write("Upload any PDF (digital or scanned). This version uses high-accuracy deep learning OCR for precise text mapping.")
+st.title("🧪 Chemical IUPAC Name Extractor")
+st.write("Upload any PDF (digital or scanned image). This version uses native Tesseract OCR to read scanned text layers safely.")
 
 uploaded_file = st.file_uploader("Upload your PDF here", type=["pdf"], key="robust_uploader")
-
-# Load high-accuracy PaddleOCR engine safely in cache
-@st.cache_resource
-def load_paddle_ocr():
-    # use_angle_cls=True automatically rotates text if the document was scanned sideways!
-    return PaddleOCR(use_angle_cls=True, lang='en', show_log=False)
 
 # Comprehensive pattern match for systematic chemical nomenclature
 def extract_iupac_patterns(text):
@@ -46,30 +39,22 @@ if uploaded_file is not None:
                 if text_content:
                     raw_text += text_content + "\n"
             
-            # 3. Trigger Pro-Grade Deep Learning OCR if no digital text layer is present
+            # 3. Trigger Tesseract OCR if no digital text layer is present
             if not raw_text.strip():
-                st.info("No digital text layer found. Initializing high-accuracy PaddleOCR... (This may take a minute on the first run)")
+                st.info("No digital text layer found. Initializing Tesseract OCR engine...")
                 
-                # Convert PDF pages to high-res images for better text recognition
+                # Convert PDF pages to high-quality images (DPI 200) for sharp OCR text matching
                 images = convert_from_bytes(file_bytes, dpi=200)
-                ocr_engine = load_paddle_ocr()
                 
                 for i, image in enumerate(images):
-                    with st.spinner(f"Scanning page {i+1} of {len(images)} with AI OCR..."):
-                        # Convert image to a numeric grid format that OCR understands
-                        img_np = np.array(image)
-                        
-                        # Run the deep learning engine on the page image
-                        result = ocr_engine.ocr(img_np, cls=True)
-                        
-                        # Gather all pieces of found text
-                        if result and result[0]:
-                            page_lines = [line[1][0] for line in result[0]]
-                            raw_text += " ".join(page_lines) + "\n"
+                    with st.spinner(f"Scanning page {i+1} of {len(images)}..."):
+                        # Direct Tesseract image processing
+                        page_text = pytesseract.image_to_string(image)
+                        raw_text += page_text + "\n"
             
             # 4. Filter text for IUPAC structures
             if not raw_text.strip():
-                st.error("The OCR engine could not identify any textual characters. Is the document blur-free?")
+                st.error("The OCR engine could not identify any textual characters. Please ensure the scan is readable.")
             else:
                 st.info("Text reading complete. Running chemical text extraction...")
                 chemical_names = extract_iupac_patterns(raw_text)
