@@ -1,5 +1,4 @@
 streamlit
 pypdf
 pdf2image
-paddleocr
-paddlepaddle-tiny
+pytesseract
