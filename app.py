@@ -5,8 +5,8 @@ import re
 import requests
 
 # 1. App Title and Description
-st.title("🧪 Verified Final Chemical Compound IUPAC Extractor")
-st.write("This version uses the Cambridge OPSIN engine to validate real chemical names and filter out random text noise.")
+st.title("🧪 Final Chemical Compound IUPAC Extractor")
+st.write("This version automatically repairs minor PDF text extraction typos before validating with Cambridge OPSIN.")
 
 # 2. Sidebar Configuration Controls
 st.sidebar.header("Filter Options")
@@ -34,21 +34,39 @@ with c_col2:
 # Main File Uploader
 uploaded_file = st.file_uploader("Upload your digital PDF here", type=["pdf"], key="clean_uploader")
 
-# Function that checks if a string is a REAL IUPAC name using Cambridge OPSIN
+# New Auto-Correction Engine to fix minor PDF typos
+def repair_iupac_typos(text_string):
+    # 1. Strip accidental spaces around brackets and hyphens (e.g., "2- amino" -> "2-amino")
+    text_string = re.sub(r'\s*([-\(\)\[\]\{\},])\s*', r'\1', text_string)
+    
+    # 2. Fix broken multi-word segments for common chemical roots (e.g., "methyl benzene" -> "methylbenzene")
+    chemical_roots = ["meth", "eth", "prop", "but", "pent", "hex", "benz", "phen", "chloro", "bromo", "amino", "nitro", "hydroxy"]
+    for root in chemical_roots:
+        text_string = re.sub(rf'\b({root})\s+', r'\1', text_string, flags=re.IGNORECASE)
+
+    # 3. Standardize hyphens (replace em-dashes or en-dashes with standard hyphens)
+    text_string = text_string.replace('—', '-').replace('–', '-')
+    
+    # 4. Standardize curly brackets back to normal brackets if corrupted
+    text_string = text_string.replace('{', '(').replace('}', ')')
+    
+    return text_string.strip(" .,()[]-:")
+
+# Checks if a string is a REAL IUPAC name using Cambridge OPSIN
 def is_valid_iupac(text_string):
-    # Clean up common text garbage around the word
-    clean_string = text_string.strip(" .,()[]-:")
+    # Run the correction engine first!
+    clean_string = repair_iupac_typos(text_string)
     
     # Fast filtering of obvious non-chemical text noise
     if len(clean_string) < 7 or any(phrase in clean_string.lower() for phrase in ["mixture of", "by replacing", "added to", "solution of", "prepared from"]):
         return False, None
         
     try:
-        # Query the official OPSIN web API (free, instant, no-key required)
+        # Query the official OPSIN web API
         url = f"https://opsin.ch.cam.ac.uk/opsin/{clean_string}.json"
         response = requests.get(url, timeout=3)
         if response.status_code == 200:
-            return True, clean_string # It's a verified IUPAC name!
+            return True, clean_string # Success!
     except:
         pass
     return False, None
@@ -64,8 +82,6 @@ def extract_verified_final_compounds(pdf_reader, s_page, e_page, c_min, c_max):
         if not text_content:
             continue
             
-        # Regex to find where compound headings are declared (e.g. "Compound 1", "Example 4")
-        # Captures lines containing the compound marker
         lines = text_content.split('\n')
         for line in lines:
             marker = re.search(r'\b(?:Compound|Example|No\.|\b)\s*([0-9]+)\b', line, re.IGNORECASE)
@@ -75,18 +91,14 @@ def extract_verified_final_compounds(pdf_reader, s_page, e_page, c_min, c_max):
                 except ValueError:
                     continue
                 
-                # Check if it falls in your targeted range
                 if c_min <= comp_num <= c_max:
-                    # Final compound names are almost always in the same header line or right below it
-                    # Split the line by spaces or commas to check individual large word blocks
+                    # Split the line cleanly to target name blocks
                     potential_blocks = re.split(r'\s{2,}|,\s|(?<=\s)(?=\()', line)
                     
                     for block in potential_blocks:
-                        # Skip text chunks that contain reaction method keywords
                         if any(k in block.lower() for k in ["stirred", "mixture", "replacing", "reaction", "added", "yield"]):
                             continue
                             
-                        # Double-check against the Cambridge chemical structure parser
                         is_chemical, verified_name = is_valid_iupac(block)
                         if is_chemical:
                             record = {
@@ -94,16 +106,15 @@ def extract_verified_final_compounds(pdf_reader, s_page, e_page, c_min, c_max):
                                 "Final IUPAC Name": verified_name,
                                 "Page Number": page_num
                             }
-                            # Keep only one primary validated compound entry per number
                             if not any(r["Compound ID"] == record["Compound ID"] for r in extracted_data):
                                 extracted_data.append(record)
-                                break # Found the main title final compound, stop looking in this line
+                                break 
                                 
     return extracted_data
 
 # 3. Process the PDF file if uploaded
 if uploaded_file is not None:
-    with st.spinner("Extracting text and verifying real IUPAC structures via OPSIN..."):
+    with st.spinner("Extracting text, repairing typos, and verifying with OPSIN..."):
         try:
             file_bytes = uploaded_file.read()
             pdf_data = io.BytesIO(file_bytes)
@@ -117,7 +128,6 @@ if uploaded_file is not None:
             
             results = extract_verified_final_compounds(reader, actual_start, actual_end, comp_start, comp_end)
 
-            # 4. Display mapped results in a layout table
             if results:
                 st.success(f"Successfully isolated {len(results)} verified final compounds!")
                 st.dataframe(results, use_container_width=True)
@@ -129,7 +139,7 @@ if uploaded_file is not None:
                 st.download_button(
                     label="Download Verified Report as CSV",
                     data=csv_data,
-                    file_name="verified_final_compounds.csv",
+                    file_name="repaired_final_compounds.csv",
                     mime="text/csv"
                 )
             else:
