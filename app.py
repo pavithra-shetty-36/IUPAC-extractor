@@ -2,14 +2,12 @@ import streamlit as st
 from pypdf import PdfReader
 import io
 import re
-import pytesseract
-from pdf2image import convert_from_bytes
 
 # 1. App Title and Description
 st.title("🧪 Chemical IUPAC Name Extractor")
-st.write("Upload any PDF (digital or scanned image). This version uses native Tesseract OCR to read scanned text layers safely.")
+st.write("Upload a digital scientific PDF to instantly scan and extract its IUPAC chemical names.")
 
-uploaded_file = st.file_uploader("Upload your PDF here", type=["pdf"], key="robust_uploader")
+uploaded_file = st.file_uploader("Upload your digital PDF here", type=["pdf"], key="clean_uploader")
 
 # Comprehensive pattern match for systematic chemical nomenclature
 def extract_iupac_patterns(text):
@@ -26,12 +24,12 @@ def extract_iupac_patterns(text):
 
 # 2. Process the PDF file if uploaded
 if uploaded_file is not None:
-    with st.spinner("Processing document..."):
+    with st.spinner("Scanning digital PDF text layer..."):
         try:
             raw_text = ""
             file_bytes = uploaded_file.read()
             
-            # Try normal digital layer text extraction first
+            # Extract text from digital layers
             pdf_data = io.BytesIO(file_bytes)
             reader = PdfReader(pdf_data)
             for page in reader.pages:
@@ -39,27 +37,14 @@ if uploaded_file is not None:
                 if text_content:
                     raw_text += text_content + "\n"
             
-            # 3. Trigger Tesseract OCR if no digital text layer is present
+            # 3. Check if text extraction worked
             if not raw_text.strip():
-                st.info("No digital text layer found. Initializing Tesseract OCR engine...")
-                
-                # Convert PDF pages to high-quality images (DPI 200) for sharp OCR text matching
-                images = convert_from_bytes(file_bytes, dpi=200)
-                
-                for i, image in enumerate(images):
-                    with st.spinner(f"Scanning page {i+1} of {len(images)}..."):
-                        # Direct Tesseract image processing
-                        page_text = pytesseract.image_to_string(image)
-                        raw_text += page_text + "\n"
-            
-            # 4. Filter text for IUPAC structures
-            if not raw_text.strip():
-                st.error("The OCR engine could not identify any textual characters. Please ensure the scan is readable.")
+                st.error("Could not extract any text. This looks like a scanned image PDF. Please upload a searchable, digital PDF document.")
             else:
-                st.info("Text reading complete. Running chemical text extraction...")
+                st.info("Text successfully extracted. Sorting chemical terms...")
                 chemical_names = extract_iupac_patterns(raw_text)
 
-                # 5. Output results
+                # 4. Output results
                 if chemical_names:
                     st.success(f"Found {len(chemical_names)} unique chemical names!")
                     st.write("### Extracted IUPAC / Chemical Names:")
@@ -70,6 +55,6 @@ if uploaded_file is not None:
                     csv = "\n".join(chemical_names)
                     st.download_button("Download List as CSV", csv, "chemicals.csv", "text/csv")
                 else:
-                    st.warning("No standard chemical names matching IUPAC rules were detected.")
+                    st.warning("No standard chemical names matching IUPAC rules were detected in the text layer.")
         except Exception as e:
             st.error(f"An error occurred: {e}")
