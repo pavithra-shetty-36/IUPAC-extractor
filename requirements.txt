@@ -1,6 +1,5 @@
 streamlit
 pypdf
-transformers
-torch
 pdf2image
-pytesseract
+paddleocr
+paddlepaddle-tiny
