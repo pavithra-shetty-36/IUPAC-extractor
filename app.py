@@ -9,9 +9,9 @@ st.write("Upload a digital scientific PDF to instantly scan and extract its IUPA
 
 uploaded_file = st.file_uploader("Upload your digital PDF here", type=["pdf"], key="clean_uploader")
 
-# Comprehensive pattern match for systematic chemical nomenclature
+# Comprehensive pattern match for systematic chemical nomenclature (Fixed regex range)
 def extract_iupac_patterns(text):
-    chemical_regex = r'\b(?:[0-9,\'\"\-a-Z\s\(\)\[\]]*)?(?:meth|eth|prop|but|pent|hex|hept|oct|non|dec|iso|cyclo|benz|phen|chloro|bromo|fluoro|iodo|amino|nitro|hydroxy|oxo|methyl|ethyl|propyl|butyl|phenyl|benzyl)+(?:ane|ene|yne|ol|one|al|oic\sacid|ate|ic\sacid|ide|ine|ole|azole|in|an|est|yl|oxy|µ|alpha|beta|gamma)s?\b'
+    chemical_regex = r'\b(?:[0-9,\'\"\-a-zA-Z\s\(\)\[\]]*)?(?:meth|eth|prop|but|pent|hex|hept|oct|non|dec|iso|cyclo|benz|phen|chloro|bromo|fluoro|iodo|amino|nitro|hydroxy|oxo|methyl|ethyl|propyl|butyl|phenyl|benzyl)+(?:ane|ene|yne|ol|one|al|oic\sacid|ate|ic\sacid|ide|ine|ole|azole|in|an|est|yl|oxy|µ|alpha|beta|gamma)s?\b'
     matches = re.findall(chemical_regex, text, re.IGNORECASE)
     
     cleaned_names = []
