@@ -9,26 +9,31 @@ from google.genai import types
 # 1. Web Page Branding
 st.set_page_config(page_title="Dynamic AI IUPAC Extractor", page_icon="🧪", layout="wide")
 st.title("🧪 Custom Dynamic AI Chemical IUPAC Extractor")
-st.write("Upload any digital PDF. Type your custom page ranges and compound boundaries below to process via Gemini AI.")
+st.write("Upload any digital PDF. Provide your API key and target configurations below to process via Gemini AI.")
 
-# 2. Sidebar Configuration Panel (Completely Generic User Inputs)
-st.sidebar.header("Scan Target Configuration")
+# 2. Key & Range Inputs directly on the Page Interface
+st.subheader("1. API Authentication & Settings")
+col_api, col_pg, col_cmp = st.columns([2, 1, 1])
 
-# Dynamic Custom Page Parsing Input
-page_input = st.sidebar.text_input(
-    "Specify Page(s) to Scan:", 
-    value="40-89", 
-    help="Examples: '40-89' for a range, '42' for a single page, or leave blank to scan the whole document."
-)
+with col_api:
+    api_key = st.text_input("Enter your Gemini API Key:", type="password", help="Get a free key at https://aistudio.google.com/")
 
-# Dynamic Custom Example/Compound Targets Input
-compound_input = st.sidebar.text_input(
-    "Specify Target Compound/Example Range:", 
-    value="1-62", 
-    help="Examples: '1-62' for a specific window, or '5' for a single structure target."
-)
+with col_pg:
+    page_input = st.text_input(
+        "Specify Page(s) to Scan:", 
+        value="40-89", 
+        help="Examples: '40-89' for a range, '42' for a single page, or leave blank to scan the whole document."
+    )
+
+with col_cmp:
+    compound_input = st.text_input(
+        "Specify Target Compound/Example Range:", 
+        value="1-62", 
+        help="Examples: '1-62' for a range, or '5' for a single structure target."
+    )
 
 # Main Dashboard Uploader
+st.subheader("2. Upload Document")
 uploaded_file = st.file_uploader("Upload your digital patent or research PDF file here", type=["pdf"])
 
 # Helper function to parse user text inputs (e.g., "40-89" -> start=40, end=89)
@@ -87,8 +92,8 @@ def analyze_page_with_ai(client, page_text, page_num, c_min, c_max):
 
 # 4. RENDER AND EXECUTION
 if uploaded_file is not None:
-    if "GEMINI_API_KEY" not in st.secrets:
-        st.error("🔑 API Key missing! Please add 'GEMINI_API_KEY' inside your Streamlit Cloud dashboard settings.")
+    if not api_key.strip():
+        st.error("🔑 Please enter your Gemini API Key in the box above to start the AI extraction process.")
     else:
         with st.spinner("Reading PDF structure..."):
             try:
@@ -98,18 +103,17 @@ if uploaded_file is not None:
                 reader = PdfReader(pdf_data)
                 total_pages = len(reader.pages)
                 
-                # Dynamically parse the page bounds entered by the user
+                # Dynamically parse custom bounds
                 parsed_start_page, parsed_end_page = parse_custom_range(page_input, 1, total_pages)
                 actual_start = max(1, parsed_start_page) - 1
                 actual_end = min(total_pages, parsed_end_page)
                 
-                # Dynamically parse the compound range targets entered by the user
                 comp_start, comp_end = parse_custom_range(compound_input, 1, 9999)
                 
                 st.info(f"🤖 AI engine scheduled to scan Pages {actual_start+1} to {actual_end} targeting Compounds/Examples {comp_start} to {comp_end}...")
                 
-                # Initialize Gemini client securely
-                client = genai.Client(api_key=st.secrets["GEMINI_API_KEY"])
+                # Initialize Gemini client using the key typed directly into the page
+                client = genai.Client(api_key=api_key.strip())
                 
                 all_results = []
                 progress_bar = st.progress(0)
@@ -140,14 +144,14 @@ if uploaded_file is not None:
                         seen_ids.add(struct_id)
                         unique_results.append(item)
                 
-                # Render Results UI Table Matrix
+                # Render Results
                 if unique_results:
                     st.success(f"Successfully compiled {len(unique_results)} chemical structures matching your input specifications!")
-                    st.dataframe(unique_records := unique_results, use_container_width=True)
+                    st.dataframe(unique_results, use_container_width=True)
                     
                     # CSV Spreadsheet Builder
                     csv_header = "Structure ID,Corrected IUPAC Name,Page Number\n"
-                    csv_rows = [f'"{r.get("Structure ID","")}","{r.get("Corrected IUPAC Name","")}",{r.get("Page Number",0)}' for r in unique_records]
+                    csv_rows = [f'"{r.get("Structure ID","")}","{r.get("Corrected IUPAC Name","")}",{r.get("Page Number",0)}' for r in unique_results]
                     csv_data = csv_header + "\n".join(csv_rows)
                     
                     st.download_button(
